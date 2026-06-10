@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>算盘 — 智能体时代的个人财务 CLI</title>
+<meta name="description" content="算盘 (Suanpan) — 智能体时代的个人财务管理工具。基于 Rust + SurrealDB，本地优先，精确高效。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Playfair+Display:ital,wght@0,400;0,600;0,800;1,400;1,600&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Variables ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0a0a08;
+  --bg-alt:    #0f0e0c;
+  --bg-card:   #141310;
+  --surface:   #1a1814;
+  --border:    #2a2720;
+  --border-light: #353128;
+  --text:      #e6ddd0;
+  --text-muted:#a09888;
+  --text-dim:  #6b6358;
+  --gold:      #b8893e;
+  --gold-light:#d4a543;
+  --gold-dim:  #7a5a2e;
+  --jade:      #5a8a6a;
+  --jade-light:#7ab88a;
+  --jade-dim:  #3a5a4a;
+  --amber:     #c4783e;
+  --terminal:  #8b9b78;
+  --terminal-dim:#5a6b4a;
+  --red:       #c4554a;
+  --red-dim:   #8a3a32;
+
+  --font-display-zh: 'Ma Shan Zheng', cursive;
+  --font-display:    'Playfair Display', 'Noto Serif SC', serif;
+  --font-body:       'Crimson Pro', 'Noto Serif SC', serif;
+  --font-mono:       'JetBrains Mono', 'Fira Code', monospace;
+
+  --max-width: 1100px;
+  --radius: 6px;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+body {
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Noise Overlay ─────────────────────────────────────────────── */
+.noise-overlay {
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none; opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+/* ── Scanline Overlay (terminal sections only) ─────────────────── */
+.scanlines {
+  position: relative;
+}
+.scanlines::after {
+  content: '';
+  position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  z-index: 1;
+}
+
+/* ── Typography ─────────────────────────────────────────────────── */
+h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; line-height: 1.2; }
+h1 { font-size: clamp(2.8rem, 6vw, 5rem); letter-spacing: -0.02em; }
+h2 { font-size: clamp(1.8rem, 3.5vw, 2.6rem); letter-spacing: -0.01em; }
+h3 { font-size: 1.3rem; }
+
+.display-zh {
+  font-family: var(--font-display-zh);
+  font-weight: 400;
+  font-style: normal;
+}
+
+.mono { font-family: var(--font-mono); font-size: 0.85rem; }
+.muted { color: var(--text-muted); }
+.dim { color: var(--text-dim); }
+.gold { color: var(--gold); }
+.jade { color: var(--jade); }
+
+/* ── Layout ─────────────────────────────────────────────────────── */
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+section {
+  padding: 6rem 0;
+  position: relative;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────── */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background 0.3s, backdrop-filter 0.3s;
+}
+.nav.scrolled {
+  background: rgba(10,10,8,0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-brand {
+  font-family: var(--font-display-zh);
+  font-size: 1.6rem;
+  color: var(--gold);
+  text-decoration: none;
+  letter-spacing: 0.04em;
+}
+
+.nav-links {
+  display: flex;
+  gap: 2rem;
+  list-style: none;
+  align-items: center;
+}
+.nav-links a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  transition: color 0.2s;
+  position: relative;
+}
+.nav-links a:hover { color: var(--gold); }
+
+.nav-bead {
+  display: flex;
+  gap: 6px;
+}
+.nav-bead span {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--border-light);
+  transition: background 0.3s, transform 0.3s;
+}
+.nav-bead span.active { background: var(--gold); transform: scale(1.5); }
+
+/* ── Hero ───────────────────────────────────────────────────────── */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding-top: 5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-bg {
+  position: absolute;
+  top: 0; right: -10%;
+  width: 60%;
+  height: 100%;
+  opacity: 0.04;
+  font-family: var(--font-display-zh);
+  font-size: 40rem;
+  color: var(--gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  pointer-events: none;
+  line-height: 1;
+  animation: heroCharFloat 8s ease-in-out infinite;
+}
+@keyframes heroCharFloat {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-12px) rotate(0deg); }
+}
+
+.hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 700px;
+}
+
+.hero-tag {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--jade-light);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.hero-tag::before {
+  content: '';
+  display: block;
+  width: 24px; height: 1px;
+  background: var(--jade);
+}
+
+.hero-title {
+  margin-bottom: 1.5rem;
+}
+.hero-title .zh {
+  display: block;
+  font-family: var(--font-display-zh);
+  font-size: clamp(5rem, 10vw, 8rem);
+  color: var(--gold);
+  line-height: 1;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.04em;
+}
+.hero-title .en {
+  display: block;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.hero-desc {
+  font-size: 1.2rem;
+  color: var(--text-muted);
+  max-width: 540px;
+  line-height: 1.7;
+  margin-bottom: 2.5rem;
+}
+
+.hero-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.875rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--terminal);
+  cursor: pointer;
+  transition: border-color 0.3s, background 0.3s;
+  position: relative;
+}
+.hero-install:hover {
+  border-color: var(--gold-dim);
+  background: #1a1814;
+}
+.hero-install .prompt {
+  color: var(--jade-light);
+  margin-right: 0.25rem;
+}
+.hero-install .copy-hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-left: auto;
+  padding-left: 1rem;
+  transition: color 0.3s;
+}
+
+/* Abacus beads on hero */
+.abacus-rods {
+  position: absolute;
+  right: 6%;
+  top: 25%;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+  opacity: 0.15;
+}
+.abacus-rod {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  position: relative;
+}
+.abacus-rod::before {
+  content: '';
+  display: block;
+  width: 160px; height: 2px;
+  background: var(--gold);
+  opacity: 0.6;
+}
+.abacus-bead {
+  width: 18px; height: 26px;
+  background: var(--jade);
+  border-radius: 4px;
+  position: absolute;
+  animation: beadSlide 6s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(90,138,106,0.3);
+}
+.abacus-rod:nth-child(2) .abacus-bead { animation-delay: -1.5s; background: var(--jade-light); }
+.abacus-rod:nth-child(3) .abacus-bead { animation-delay: -0.5s; background: var(--gold-dim); }
+.abacus-rod:nth-child(4) .abacus-bead { animation-delay: -3s; }
+.abacus-rod:nth-child(5) .abacus-bead { animation-delay: -2s; background: var(--amber); }
+.abacus-rod:nth-child(6) .abacus-bead { animation-delay: -4s; }
+.abacus-rod:nth-child(7) .abacus-bead { animation-delay: -1s; background: var(--jade-light); }
+
+@keyframes beadSlide {
+  0%, 100% { left: 20px; }
+  40% { left: 120px; }
+  60% { left: 120px; }
+}
+
+/* ── Section Headers ────────────────────────────────────────────── */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-bottom: 3.5rem;
+}
+.section-number {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--gold);
+  letter-spacing: 0.1em;
+}
+.section-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.section-header h2 {
+  flex-shrink: 0;
+}
+
+/* ── Features Grid ──────────────────────────────────────────────── */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.feature-card {
+  background: var(--bg-card);
+  padding: 2.5rem 2rem;
+  position: relative;
+  transition: background 0.3s;
+}
+.feature-card:hover {
+  background: var(--surface);
+}
+.feature-card .bead-icon {
+  width: 12px; height: 16px;
+  background: var(--jade);
+  border-radius: 3px;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 0 10px rgba(90,138,106,0.2);
+}
+.feature-card:nth-child(2) .bead-icon { background: var(--gold); box-shadow: 0 0 10px rgba(184,137,62,0.2); }
+.feature-card:nth-child(3) .bead-icon { background: var(--amber); box-shadow: 0 0 10px rgba(196,120,62,0.2); }
+.feature-card:nth-child(5) .bead-icon { background: var(--gold); box-shadow: 0 0 10px rgba(184,137,62,0.2); }
+.feature-card:nth-child(7) .bead-icon { background: var(--amber); box-shadow: 0 0 10px rgba(196,120,62,0.2); }
+
+.feature-card h3 {
+  font-size: 1.15rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+.feature-card p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+/* ── Terminal ───────────────────────────────────────────────────── */
+.terminal-window {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.25rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.terminal-dot:nth-child(1) { background: #c4554a; }
+.terminal-dot:nth-child(2) { background: #c4944a; }
+.terminal-dot:nth-child(3) { background: #5a8a5a; }
+.terminal-title {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-left: 0.75rem;
+}
+.terminal-body {
+  padding: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.9;
+  color: var(--terminal);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.terminal-body .prompt { color: var(--jade-light); }
+.terminal-body .cmd { color: var(--text); }
+.terminal-body .arg { color: var(--gold-light); }
+.terminal-body .val { color: var(--amber); }
+.terminal-body .comment { color: var(--terminal-dim); }
+.terminal-body .cursor::after {
+  content: '█';
+  color: var(--text);
+  animation: cursorBlink 0.8s step-end infinite;
+}
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.terminal-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  margin-top: 2rem;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.stat-item {
+  background: var(--bg-card);
+  padding: 1.5rem;
+  text-align: center;
+}
+.stat-value {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  color: var(--gold);
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ── Transaction Type Cards ─────────────────────────────────────── */
+.tx-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1.5rem;
+}
+.tx-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem 1.5rem;
+  text-align: center;
+  transition: border-color 0.3s, transform 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+.tx-card:hover {
+  border-color: var(--gold-dim);
+  transform: translateY(-2px);
+}
+.tx-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  transition: background 0.3s;
+}
+.tx-card:nth-child(1)::before { background: var(--red-dim); }
+.tx-card:nth-child(2)::before { background: var(--jade); }
+.tx-card:nth-child(3)::before { background: var(--gold-dim); }
+.tx-card:nth-child(4)::before { background: var(--amber); }
+.tx-card:nth-child(5)::before { background: var(--jade-dim); }
+.tx-card:hover::before { height: 3px; }
+.tx-card .tx-icon {
+  font-family: var(--font-display-zh);
+  font-size: 2.5rem;
+  color: var(--gold);
+  margin-bottom: 0.75rem;
+  line-height: 1;
+}
+.tx-card:nth-child(1) .tx-icon { color: var(--red); }
+.tx-card:nth-child(2) .tx-icon { color: var(--jade-light); }
+.tx-card:nth-child(3) .tx-icon { color: var(--gold); }
+.tx-card:nth-child(4) .tx-icon { color: var(--amber); }
+.tx-card:nth-child(5) .tx-icon { color: var(--jade); }
+.tx-card h4 {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+.tx-card .tx-tag {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.tx-card p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+  line-height: 1.5;
+}
+
+/* ── Comparison Section ─────────────────────────────────────────── */
+.compare-box {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.compare-col {
+  background: var(--bg-card);
+  padding: 2.5rem;
+}
+.compare-col h4 {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 1.25rem;
+}
+.compare-col ul {
+  list-style: none;
+}
+.compare-col li {
+  padding: 0.5rem 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.compare-col li::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.compare-col:first-child li::before { background: var(--jade); }
+.compare-col:last-child li::before { background: var(--gold); }
+.compare-col:last-child li::before {
+  border-radius: 2px;
+}
+
+/* ── Install Section ────────────────────────────────────────────── */
+.install-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+.install-block {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+}
+.install-block h4 {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1.25rem;
+}
+.install-block pre {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.8;
+  color: var(--terminal);
+  overflow-x: auto;
+}
+.install-block code {
+  color: var(--gold-light);
+}
+
+.storage-path {
+  margin-top: 2rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--terminal);
+}
+.storage-path .icon { font-size: 1.2rem; color: var(--gold-dim); }
+
+/* ── Footer ─────────────────────────────────────────────────────── */
+.footer {
+  border-top: 1px solid var(--border);
+  padding: 3rem 0;
+  text-align: center;
+}
+.footer-beat {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 1.5rem;
+}
+.footer-beat span {
+  width: 8px; height: 12px;
+  background: var(--gold-dim);
+  border-radius: 2px;
+  animation: beadPulse 2s ease-in-out infinite;
+}
+.footer-beat span:nth-child(2) { animation-delay: 0.2s; }
+.footer-beat span:nth-child(3) { animation-delay: 0.4s; }
+.footer-beat span:nth-child(4) { animation-delay: 0.6s; }
+.footer-beat span:nth-child(5) { animation-delay: 0.8s; }
+
+@keyframes beadPulse {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(-6px); opacity: 0.9; }
+}
+
+.footer p {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+.footer a {
+  color: var(--gold-dim);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.footer a:hover { color: var(--gold); }
+
+/* ── Scroll Reveal ──────────────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+
+/* ── Copy Toast ─────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: var(--jade-dim);
+  color: var(--jade-light);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--radius);
+  z-index: 200;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .container { padding: 0 1.25rem; }
+  section { padding: 4rem 0; }
+  .hero { min-height: auto; padding-top: 7rem; padding-bottom: 4rem; }
+  .hero-bg { font-size: 20rem; right: -20%; opacity: 0.03; }
+  .nav-links { display: none; }
+  .abacus-rods { right: -5%; opacity: 0.08; gap: 1.5rem; }
+  .abacus-rod::before { width: 100px; }
+  @keyframes beadSlide {
+    0%, 100% { left: 10px; }
+    40% { left: 70px; }
+    60% { left: 70px; }
+  }
+  .features-grid { grid-template-columns: 1fr; }
+  .terminal-stats { grid-template-columns: 1fr; }
+  .tx-grid { grid-template-columns: repeat(2, 1fr); }
+  .compare-box { grid-template-columns: 1fr; }
+  .install-grid { grid-template-columns: 1fr; }
+  .hero-title .zh { font-size: 4rem; }
+}
+
+@media (max-width: 480px) {
+  .tx-grid { grid-template-columns: 1fr; }
+  .abacus-rods { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="noise-overlay"></div>
+
+<!-- Navigation ──────────────────────────────────────────────────── -->
+<nav class="nav" id="nav">
+  <a href="#" class="nav-brand">算盘</a>
+  <ul class="nav-links">
+    <li><a href="#features">特性</a></li>
+    <li><a href="#demo">示例</a></li>
+    <li><a href="#transactions">交易</a></li>
+    <li><a href="#install">安装</a></li>
+    <li>
+      <div class="nav-bead">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </li>
+  </ul>
+</nav>
+
+<!-- Hero ────────────────────────────────────────────────────────── -->
+<section class="hero" id="hero">
+  <div class="hero-bg">盘</div>
+  <div class="abacus-rods">
+    <div class="abacus-rod"><div class="abacus-bead"></div></div>
+    <div class="abacus-rod"><div class="abacus-bead"></div></div>
+    <div class="abacus-rod"><div class="abacus-bead"></div></div>
+    <div class="abacus-rod"><div class="abacus-bead"></div></div>
+    <div class="abacus-rod"><div class="abacus-bead"></div></div>
+    <div class="abacus-rod"><div class="abacus-bead"></div></div>
+    <div class="abacus-rod"><div class="abacus-bead"></div></div>
+  </div>
+  <div class="container">
+    <div class="hero-content">
+      <div class="hero-tag reveal">v0.2.0 &nbsp;·&nbsp; Rust + SurrealDB &nbsp;·&nbsp; GPL-3.0</div>
+      <div class="hero-title reveal reveal-delay-1">
+        <span class="zh">算盘</span>
+        <span class="en">The Abacus for the Agent Era</span>
+      </div>
+      <p class="hero-desc reveal reveal-delay-2">
+        智能体时代的个人财务管理工具。像算盘珠子一样精确，像命令行一样高效。
+        所有数据本地存储，无需网络，完全掌控。
+      </p>
+      <div class="reveal reveal-delay-3">
+        <div class="hero-install" id="heroInstall" onclick="copyInstall()" title="点击复制安装命令">
+          <span class="prompt">$</span>
+          <span>curl -sSL https://raw.githubusercontent.com/yinguobing/suanpan/main/install.sh | bash</span>
+          <span class="copy-hint" id="copyHint">⎘ 复制</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features ────────────────────────────────────────────────────── -->
+<section id="features">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-number">01</span>
+      <div class="section-line"></div>
+      <h2>特性</h2>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal"><div class="bead-icon"></div><h3>本地优先</h3><p>所有数据存储在本地 SurrealKV 嵌入式数据库，无需网络连接，单文件便于备份。</p></div>
+      <div class="feature-card reveal reveal-delay-1"><div class="bead-icon"></div><h3>精确计算</h3><p>使用 Decimal 类型进行所有金额计算，杜绝浮点数精度问题，分毫不差。</p></div>
+      <div class="feature-card reveal reveal-delay-2"><div class="bead-icon"></div><h3>多种交易类型</h3><p>支持支出、收入、转账、债务变动、债权变动五种交易类型，全面覆盖个人财务场景。</p></div>
+      <div class="feature-card reveal"><div class="bead-icon"></div><h3>智能查询</h3><p>模糊搜索、组合筛选、CSV 导出，快速找到任何一笔交易记录。</p></div>
+      <div class="feature-card reveal reveal-delay-1"><div class="bead-icon"></div><h3>统计报表</h3><p>月度收支统计、分类占比、趋势分析、环比同比对比，全面掌握财务状况。</p></div>
+      <div class="feature-card reveal reveal-delay-2"><div class="bead-icon"></div><h3>多级分类</h3><p>灵活的多级分类体系，支持层级汇总。内置标签与账户管理。</p></div>
+      <div class="feature-card reveal"><div class="bead-icon"></div><h3>数据导入</h3><p>支持随手记 XLS/XLSX/CSV 格式导入，自动去重，无缝迁移历史数据。</p></div>
+      <div class="feature-card reveal reveal-delay-1"><div class="bead-icon"></div><h3>HTML 报表</h3><p>一键生成结构化 HTML 数据报表，方便分享给智能体进行分析。</p></div>
+      <div class="feature-card reveal reveal-delay-2"><div class="bead-icon"></div><h3>Agent 友好</h3><p>所有输出均可切换为 LLM 友好格式，专为智能体时代的自动化财务管理设计。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- Terminal Demo ───────────────────────────────────────────────── -->
+<section id="demo" style="background: var(--bg-alt);">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-number">02</span>
+      <div class="section-line"></div>
+      <h2>命令行</h2>
+    </div>
+    <div class="reveal reveal-delay-1">
+      <div class="terminal-window scanlines">
+        <div class="terminal-header">
+          <span class="terminal-dot"></span>
+          <span class="terminal-dot"></span>
+          <span class="terminal-dot"></span>
+          <span class="terminal-title">terminal — suanpan</span>
+        </div>
+        <div class="terminal-body">
+<span class="comment"># 记录一笔午餐支出</span>
+<span class="prompt">$</span> <span class="cmd">suanpan</span> add <span class="arg">-a</span> <span class="val">35</span> <span class="arg">-f</span> <span class="val">支付宝</span> <span class="arg">-c</span> <span class="val">"餐饮/午餐"</span> <span class="arg">-d</span> <span class="val">"工作午餐"</span>
+<span style="color: var(--jade)">✓</span> 已添加支出记录 <span style="color: var(--text-dim)">| ID: x7k2m9p1</span>
+
+<span class="comment"># 记录工资收入</span>
+<span class="prompt">$</span> <span class="cmd">suanpan</span> add <span class="arg">-a</span> <span class="val">8500</span> <span class="arg">-t</span> <span class="val">income</span> <span class="arg">-f</span> <span class="val">公司</span> <span class="arg">-c</span> <span class="val">"收入/工资"</span> <span class="arg">-d</span> <span class="val">"三月工资"</span>
+<span style="color: var(--jade)">✓</span> 已添加收入记录 <span style="color: var(--text-dim)">| ID: a3w8n4q2</span>
+
+<span class="comment"># 查看月度统计</span>
+<span class="prompt">$</span> <span class="cmd">suanpan</span> stats <span class="arg">--month</span> <span class="val">2026-04</span> <span class="arg">--by-category</span>
+<span style="color: var(--gold)">  类别              金额         占比</span>
+  ─────────────────────────────────────
+  餐饮/午餐       ¥1,050.00     12.3%
+  餐饮/晚餐         ¥680.00      8.0%
+  交通/地铁         ¥200.00      2.3%
+  收入/工资       ¥8,500.00        —
+  ─────────────────────────────────────
+  <span style="color: var(--jade)">  本月结余       ¥5,230.00</span>
+
+<span class="comment"># 趋势分析</span>
+<span class="prompt">$</span> <span class="cmd">suanpan</span> trend <span class="arg">--period</span> <span class="val">month</span>
+<span style="color: var(--gold)">  月份         支出         收入         结余</span>
+  ─────────────────────────────────────────────
+  2026-01    ¥4,200.00    ¥8,500.00   +¥4,300.00
+  2026-02    ¥3,890.00    ¥8,500.00   +¥4,610.00
+  2026-03    ¥5,120.00    ¥8,500.00   +¥3,380.00
+<span class="prompt">$</span> <span class="cursor"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="terminal-stats reveal reveal-delay-2">
+      <div class="stat-item">
+        <div class="stat-value">5</div>
+        <div class="stat-label">交易类型</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">0ms</div>
+        <div class="stat-label">网络延迟</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">1</div>
+        <div class="stat-label">单文件数据库</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Transaction Types ───────────────────────────────────────────── -->
+<section id="transactions">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-number">03</span>
+      <div class="section-line"></div>
+      <h2>交易类型</h2>
+    </div>
+    <div class="tx-grid">
+      <div class="tx-card reveal">
+        <div class="tx-icon">支</div>
+        <h4>支出</h4>
+        <span class="tx-tag">expense</span>
+        <p>日常消费、购物、餐饮、交通等支出记录</p>
+      </div>
+      <div class="tx-card reveal reveal-delay-1">
+        <div class="tx-icon">收</div>
+        <h4>收入</h4>
+        <span class="tx-tag">income</span>
+        <p>工资、理财收益、兼职等各类收入来源</p>
+      </div>
+      <div class="tx-card reveal reveal-delay-2">
+        <div class="tx-icon">转</div>
+        <h4>转账</h4>
+        <span class="tx-tag">transfer</span>
+        <p>账户间资金转移，不改变总资产</p>
+      </div>
+      <div class="tx-card reveal reveal-delay-3">
+        <div class="tx-icon">债</div>
+        <h4>债务变动</h4>
+        <span class="tx-tag">debtchange</span>
+        <p>借入、偿还债务的记录与追踪</p>
+      </div>
+      <div class="tx-card reveal reveal-delay-4">
+        <div class="tx-icon">贷</div>
+        <h4>债权变动</h4>
+        <span class="tx-tag">creditchange</span>
+        <p>借出、收回借款的完整管理</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Why Suanpan ─────────────────────────────────────────────────── -->
+<section style="background: var(--bg-alt);">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-number">04</span>
+      <div class="section-line"></div>
+      <h2>为什么选择算盘</h2>
+    </div>
+    <div class="compare-box reveal reveal-delay-1">
+      <div class="compare-col">
+        <h4>云端记账工具</h4>
+        <ul>
+          <li>数据存储在第三方服务器</li>
+          <li>需要注册账号和网络连接</li>
+          <li>隐私取决于服务商政策</li>
+          <li>功能臃肿，广告干扰</li>
+          <li>API 受限，自动化困难</li>
+          <li>数据迁移和导出受限</li>
+        </ul>
+      </div>
+      <div class="compare-col">
+        <h4>算盘</h4>
+        <ul>
+          <li>数据完全在你手中</li>
+          <li>离线可用，无需注册</li>
+          <li>开源可审计，GPL-3.0</li>
+          <li>专注核心功能，简洁高效</li>
+          <li>为智能体和自动化而生</li>
+          <li>标准格式，自由导入导出</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Installation ────────────────────────────────────────────────── -->
+<section id="install">
+  <div class="container">
+    <div class="section-header reveal">
+      <span class="section-number">05</span>
+      <div class="section-line"></div>
+      <h2>安装</h2>
+    </div>
+    <div class="install-grid reveal reveal-delay-1">
+      <div class="install-block">
+        <h4>快速安装（推荐）</h4>
+        <pre>curl -sSL <code>https://raw.githubusercontent.com/<wbr>yinguobing/suanpan/main/<wbr>install.sh</code> | bash</pre>
+        <p class="muted" style="margin-top: 1rem; font-size: 0.85rem;">自动检测操作系统和架构，下载对应预编译二进制。</p>
+      </div>
+      <div class="install-block">
+        <h4>从源码编译</h4>
+        <pre>git clone <code>https://github.com/<wbr>yinguobing/suanpan.git</code>
+cd suanpan
+cargo build --release
+sudo cp target/release/<wbr>suanpan /usr/local/bin/</pre>
+        <p class="muted" style="margin-top: 1rem; font-size: 0.85rem;">需要 Rust 1.82+ 工具链。</p>
+      </div>
+    </div>
+    <div class="storage-path reveal reveal-delay-2">
+      <span class="icon">🗄</span>
+      <span>数据存储位置：<span style="color: var(--gold-light);">~/.local/share/suanpan/data.db</span></span>
+    </div>
+  </div>
+</section>
+
+<!-- Footer ──────────────────────────────────────────────────────── -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-beat">
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <p>
+      算盘 &nbsp;·&nbsp;
+      <a href="https://github.com/yinguobing/suanpan">GitHub</a> &nbsp;·&nbsp;
+      GPL-3.0 &nbsp;·&nbsp;
+      Built with Rust & SurrealDB
+    </p>
+  </div>
+</footer>
+
+<!-- Toast ───────────────────────────────────────────────────────── -->
+<div class="toast" id="toast">已复制到剪贴板</div>
+
+<!-- Scripts ─────────────────────────────────────────────────────── -->
+<script>
+// ── Navigation scroll effect ─────────────────────────────────────
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.scrollY > 50);
+}, { passive: true });
+
+// ── Scroll reveal ────────────────────────────────────────────────
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, {
+  threshold: 0.1,
+  rootMargin: '0px 0px -40px 0px'
+});
+
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// ── Copy install command ─────────────────────────────────────────
+async function copyInstall() {
+  const cmd = "curl -sSL https://raw.githubusercontent.com/yinguobing/suanpan/main/install.sh | bash";
+  try {
+    await navigator.clipboard.writeText(cmd);
+    const toast = document.getElementById('toast');
+    toast.classList.add('show');
+    document.getElementById('copyHint').textContent = '✓ 已复制';
+    setTimeout(() => {
+      toast.classList.remove('show');
+      document.getElementById('copyHint').textContent = '⎘ 复制';
+    }, 2000);
+  } catch {
+    // Fallback for non-HTTPS
+    document.getElementById('copyHint').textContent = '请手动复制';
+  }
+}
+
+// ── Active nav bead tracking ─────────────────────────────────────
+const sections = document.querySelectorAll('section[id]');
+const beads = document.querySelectorAll('.nav-bead span');
+window.addEventListener('scroll', () => {
+  let current = 0;
+  sections.forEach((sec, i) => {
+    if (window.scrollY >= sec.offsetTop - 200) current = i;
+  });
+  beads.forEach((b, i) => {
+    b.classList.toggle('active', i === Math.min(current, beads.length - 1));
+  });
+}, { passive: true });
+</script>
+
+</body>
+</html>
